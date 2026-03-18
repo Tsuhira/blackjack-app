@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blackjack</title>
+</head>
+<body>
+
+  <!-- Game UI (worker1: HTML/CSS, worker3: UI management) -->
+  <div id="game-container">
+    <div id="dealer-area">
+      <h2>ディーラー</h2>
+      <div id="dealer-cards"></div>
+      <div id="dealer-score"></div>
+    </div>
+    <div id="player-area">
+      <h2>プレイヤー</h2>
+      <div id="player-cards"></div>
+      <div id="player-score"></div>
+    </div>
+    <div id="controls">
+      <div id="balance-area">残高: <span id="balance">1000</span> chips</div>
+      <div id="bet-area">ベット: <span id="bet">0</span> chips</div>
+      <div id="chip-buttons"></div>
+      <div id="action-buttons">
+        <button id="deal-btn">ディール</button>
+        <button id="hit-btn" disabled>ヒット</button>
+        <button id="stand-btn" disabled>スタンド</button>
+        <button id="reset-btn">リセット</button>
+      </div>
+    </div>
+    <div id="message-area"></div>
+    <div id="result-area"></div>
+  </div>
+
+  <script>
+    /**
+     * ゲームロジックモジュール
+     * グローバルに公開: window.BlackjackGame
+     */
+    (function () {
+      const SUITS = ['♠', '♥', '♦', '♣'];
+      const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+      function getNumericValue(value) {
+        if (value === 'A') return 11;
+        if (['J', 'Q', 'K'].includes(value)) return 10;
+        return parseInt(value, 10);
+      }
+
+      let deck = [];
+
+      /**
+       * デッキを初期化して返す（52枚）
+       */
+      function initDeck() {
+        deck = [];
+        for (const suit of SUITS) {
+          for (const value of VALUES) {
+            deck.push({ suit, value, numericValue: getNumericValue(value) });
+          }
+        }
+        shuffleDeck();
+        return deck;
+      }
+
+      /**
+       * Fisher-Yates アルゴリズムでデッキをシャッフル
+       */
+      function shuffleDeck() {
+        for (let i = deck.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+        return deck;
+      }
+
+      /**
+       * カード配列からスコアを計算する
+       * Aは1または11として最適な値を選択する
+       */
+      function calculateScore(cards) {
+        let score = 0;
+        let aces = 0;
+
+        for (const card of cards) {
+          if (card.value === 'A') {
+            aces++;
+            score += 11;
+          } else {
+            score += card.numericValue;
+          }
+        }
+
+        // バストする場合はAを1として扱う
+        while (score > 21 && aces > 0) {
+          score -= 10;
+          aces--;
+        }
+
+        return score;
+      }
+
+      /**
+       * デッキから1枚引く
+       * デッキが空の場合は再初期化する
+       */
+      function dealCard() {
+        if (deck.length === 0) {
+          initDeck();
+        }
+        return deck.pop();
+      }
+
+      /**
+       * バスト判定（スコア > 21）
+       */
+      function checkBust(cards) {
+        return calculateScore(cards) > 21;
+      }
+
+      /**
+       * ブラックジャック判定（2枚で21点）
+       */
+      function checkBlackjack(cards) {
+        return cards.length === 2 && calculateScore(cards) === 21;
+      }
+
+      /**
+       * 勝敗判定
+       * ディーラーはスコアが16以下なら必ずヒット（呼び出し側で制御）
+       * @returns 'player' | 'dealer' | 'push'
+       */
+      function getWinner(playerCards, dealerCards) {
+        const playerScore = calculateScore(playerCards);
+        const dealerScore = calculateScore(dealerCards);
+
+        const playerBust = playerScore > 21;
+        const dealerBust = dealerScore > 21;
+
+        if (playerBust) return 'dealer';
+        if (dealerBust) return 'player';
+
+        const playerBJ = checkBlackjack(playerCards);
+        const dealerBJ = checkBlackjack(dealerCards);
+
+        if (playerBJ && dealerBJ) return 'push';
+        if (playerBJ) return 'player';
+        if (dealerBJ) return 'dealer';
+
+        if (playerScore > dealerScore) return 'player';
+        if (dealerScore > playerScore) return 'dealer';
+        return 'push';
+      }
+
+      // グローバルに公開
+      window.BlackjackGame = {
+        initDeck,
+        shuffleDeck,
+        calculateScore,
+        dealCard,
+        checkBust,
+        checkBlackjack,
+        getWinner,
+      };
+    })();
+  </script>
+</body>
+</html>
