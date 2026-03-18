@@ -298,5 +298,337 @@
 
   </div>
 
+
+<!-- ===== Game Logic (worker2) ===== -->
+<script>
+(function () {
+  var SUITS = ['\u2660', '\u2665', '\u2666', '\u2663'];
+  var VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+  function getNumericValue(value) {
+    if (value === 'A') return 11;
+    if (['J', 'Q', 'K'].indexOf(value) !== -1) return 10;
+    return parseInt(value, 10);
+  }
+
+  var deck = [];
+
+  function initDeck() {
+    deck = [];
+    for (var s = 0; s < SUITS.length; s++) {
+      for (var v = 0; v < VALUES.length; v++) {
+        deck.push({ suit: SUITS[s], value: VALUES[v], numericValue: getNumericValue(VALUES[v]) });
+      }
+    }
+    shuffleDeck();
+    return deck;
+  }
+
+  function shuffleDeck() {
+    for (var i = deck.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = deck[i]; deck[i] = deck[j]; deck[j] = tmp;
+    }
+    return deck;
+  }
+
+  function calculateScore(cards) {
+    var score = 0, aces = 0;
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].value === 'A') { aces++; score += 11; }
+      else { score += cards[i].numericValue; }
+    }
+    while (score > 21 && aces > 0) { score -= 10; aces--; }
+    return score;
+  }
+
+  function dealCard() {
+    if (deck.length === 0) initDeck();
+    return deck.pop();
+  }
+
+  function checkBust(cards) { return calculateScore(cards) > 21; }
+  function checkBlackjack(cards) { return cards.length === 2 && calculateScore(cards) === 21; }
+
+  function getWinner(playerCards, dealerCards) {
+    var ps = calculateScore(playerCards);
+    var ds = calculateScore(dealerCards);
+    if (ps > 21) return 'dealer';
+    if (ds > 21) return 'player';
+    var pBJ = checkBlackjack(playerCards);
+    var dBJ = checkBlackjack(dealerCards);
+    if (pBJ && dBJ) return 'push';
+    if (pBJ) return 'player';
+    if (dBJ) return 'dealer';
+    if (ps > ds) return 'player';
+    if (ds > ps) return 'dealer';
+    return 'push';
+  }
+
+  window.BlackjackGame = { initDeck, shuffleDeck, calculateScore, dealCard, checkBust, checkBlackjack, getWinner };
+})();
+</script>
+
+<!-- ===== UI Management (worker3) ===== -->
+<script>
+(function () {
+  var G = window.BlackjackGame;
+
+  // ── State ─────────────────────────────────────────────────
+  var GameState = {
+    balance: 1000,
+    bet: 0,
+    playerCards: [],
+    dealerCards: [],
+    gamePhase: 'betting'  // 'betting' | 'playing' | 'ended'
+  };
+
+  // ── DOM refs ──────────────────────────────────────────────
+  var elBalanceDisplay = document.getElementById('balance-display');
+  var elBetDisplay     = document.getElementById('bet-display');
+  var elPlayerCards    = document.getElementById('player-cards');
+  var elDealerCards    = document.getElementById('dealer-cards');
+  var elPlayerScore    = document.getElementById('player-score');
+  var elDealerScore    = document.getElementById('dealer-score');
+  var elMessage        = document.getElementById('message');
+  var btnClearBet      = document.getElementById('btn-clear-bet');
+  var btnDeal          = document.getElementById('btn-deal');
+  var btnHit           = document.getElementById('btn-hit');
+  var btnStand         = document.getElementById('btn-stand');
+  var chipBtns         = document.querySelectorAll('.chip-btn');
+
+  var RED_SUITS = ['\u2665', '\u2666'];
+
+  // ── Card rendering ────────────────────────────────────────
+  function makeCardEl(card, hidden) {
+    var el = document.createElement('div');
+    el.className = 'card' + (hidden ? ' face-down' : '');
+    if (!hidden) {
+      var isRed = RED_SUITS.indexOf(card.suit) !== -1;
+      el.classList.add(isRed ? 'suit-red' : 'suit-black');
+    }
+    el.innerHTML =
+      '<div class="card-top"><span class="card-rank">' + (hidden ? '' : card.value) + '</span>' +
+      '<span class="card-suit-small">' + (hidden ? '' : card.suit) + '</span></div>' +
+      '<div class="card-center">' + (hidden ? '' : card.suit) + '</div>' +
+      '<div class="card-bottom"><span class="card-rank">' + (hidden ? '' : card.value) + '</span>' +
+      '<span class="card-suit-small">' + (hidden ? '' : card.suit) + '</span></div>';
+    return el;
+  }
+
+  function renderCards(cards, container, hideFirst) {
+    container.innerHTML = '';
+    for (var i = 0; i < cards.length; i++) {
+      (function(el, delay) {
+        el.style.animationDelay = delay + 's';
+        container.appendChild(el);
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() { el.classList.add('card-deal'); });
+        });
+      })(makeCardEl(cards[i], hideFirst && i === 0), i * 0.12);
+    }
+  }
+
+  function revealDealerCard() {
+    var firstCard = elDealerCards.firstElementChild;
+    if (firstCard && firstCard.classList.contains('face-down')) {
+      var card = GameState.dealerCards[0];
+      var isRed = RED_SUITS.indexOf(card.suit) !== -1;
+      firstCard.className = 'card ' + (isRed ? 'suit-red' : 'suit-black') + ' card-flip';
+      firstCard.innerHTML =
+        '<div class="card-top"><span class="card-rank">' + card.value + '</span>' +
+        '<span class="card-suit-small">' + card.suit + '</span></div>' +
+        '<div class="card-center">' + card.suit + '</div>' +
+        '<div class="card-bottom"><span class="card-rank">' + card.value + '</span>' +
+        '<span class="card-suit-small">' + card.suit + '</span></div>';
+    }
+  }
+
+  // ── Display update ────────────────────────────────────────
+  function updateDisplay() {
+    elBalanceDisplay.textContent = '$' + GameState.balance.toLocaleString();
+    elBetDisplay.textContent = '$' + GameState.bet.toLocaleString();
+
+    if (GameState.playerCards.length) {
+      elPlayerScore.textContent = G.calculateScore(GameState.playerCards);
+    } else {
+      elPlayerScore.textContent = '0';
+    }
+
+    if (GameState.gamePhase === 'playing') {
+      // Show only visible dealer card score
+      if (GameState.dealerCards.length > 1) {
+        elDealerScore.textContent = G.calculateScore([GameState.dealerCards[1]]);
+      } else {
+        elDealerScore.textContent = '0';
+      }
+    } else if (GameState.dealerCards.length) {
+      elDealerScore.textContent = G.calculateScore(GameState.dealerCards);
+    } else {
+      elDealerScore.textContent = '0';
+    }
+  }
+
+  function updatePhaseButtons() {
+    var ph = GameState.gamePhase;
+    var inBetting = ph === 'betting';
+    var inPlaying = ph === 'playing';
+
+    chipBtns.forEach(function(b) { b.disabled = !inBetting; });
+    btnClearBet.disabled = !inBetting || GameState.bet === 0;
+    btnHit.disabled      = !inPlaying;
+    btnStand.disabled    = !inPlaying;
+
+    if (ph === 'ended') {
+      btnDeal.textContent = 'Next Game';
+      btnDeal.disabled = false;
+    } else {
+      btnDeal.textContent = 'Deal';
+      btnDeal.disabled = inPlaying || (inBetting && GameState.bet === 0);
+    }
+  }
+
+  function showMessage(text, type) {
+    elMessage.textContent = text || '';
+    elMessage.className = type || '';
+  }
+
+  // ── Chip / Bet ────────────────────────────────────────────
+  function addChip(amount) {
+    if (GameState.gamePhase !== 'betting') return;
+    if (GameState.bet + amount > GameState.balance) {
+      showMessage('Insufficient balance!', 'msg-lose');
+      return;
+    }
+    GameState.bet += amount;
+    if (elMessage.className === 'msg-lose') showMessage('', 'msg-info');
+    updateDisplay();
+    updatePhaseButtons();
+  }
+
+  function clearBet() {
+    if (GameState.gamePhase !== 'betting') return;
+    GameState.bet = 0;
+    showMessage('Place your bet and press Deal!', 'msg-info');
+    updateDisplay();
+    updatePhaseButtons();
+  }
+
+  // ── Deal ──────────────────────────────────────────────────
+  function startGame() {
+    if (GameState.gamePhase === 'ended') {
+      // Reset for next round
+      GameState.gamePhase = 'betting';
+      GameState.bet = 0;
+      GameState.playerCards = [];
+      GameState.dealerCards = [];
+      elPlayerCards.innerHTML = '';
+      elDealerCards.innerHTML = '';
+      showMessage('Place your bet and press Deal!', 'msg-info');
+      updateDisplay();
+      updatePhaseButtons();
+      return;
+    }
+
+    if (GameState.bet === 0 || GameState.gamePhase !== 'betting') return;
+
+    GameState.balance -= GameState.bet;
+    G.initDeck();
+    GameState.playerCards = [G.dealCard(), G.dealCard()];
+    GameState.dealerCards = [G.dealCard(), G.dealCard()];
+    GameState.gamePhase = 'playing';
+
+    renderCards(GameState.playerCards, elPlayerCards, false);
+    renderCards(GameState.dealerCards, elDealerCards, true);
+    showMessage('');
+    updateDisplay();
+    updatePhaseButtons();
+
+    if (G.checkBlackjack(GameState.playerCards)) {
+      setTimeout(resolveGame, 700);
+    }
+  }
+
+  // ── Hit ───────────────────────────────────────────────────
+  function hit() {
+    if (GameState.gamePhase !== 'playing') return;
+    GameState.playerCards.push(G.dealCard());
+    renderCards(GameState.playerCards, elPlayerCards, false);
+    updateDisplay();
+    if (G.checkBust(GameState.playerCards)) {
+      setTimeout(resolveGame, 400);
+    }
+  }
+
+  // ── Stand ─────────────────────────────────────────────────
+  function stand() {
+    if (GameState.gamePhase !== 'playing') return;
+    while (G.calculateScore(GameState.dealerCards) <= 16) {
+      GameState.dealerCards.push(G.dealCard());
+    }
+    resolveGame();
+  }
+
+  // ── Resolve ───────────────────────────────────────────────
+  function resolveGame() {
+    GameState.gamePhase = 'ended';
+    revealDealerCard();
+    // Re-render dealer cards to show all (including newly drawn)
+    if (GameState.dealerCards.length > 2) {
+      renderCards(GameState.dealerCards, elDealerCards, false);
+    }
+    updateDisplay();
+    updatePhaseButtons();
+
+    var winner = G.getWinner(GameState.playerCards, GameState.dealerCards);
+    var playerBJ = G.checkBlackjack(GameState.playerCards);
+
+    if (winner === 'player') {
+      if (playerBJ) {
+        var payout = Math.floor(GameState.bet * 1.5);
+        GameState.balance += GameState.bet + payout;
+        showMessage('Blackjack! You win $' + payout + ' bonus!', 'msg-win');
+      } else {
+        GameState.balance += GameState.bet * 2;
+        showMessage('You win! +$' + GameState.bet, 'msg-win');
+      }
+    } else if (winner === 'dealer') {
+      showMessage('Dealer wins. -$' + GameState.bet, 'msg-lose');
+    } else {
+      GameState.balance += GameState.bet;
+      showMessage('Push — bet returned.', 'msg-push');
+    }
+
+    updateDisplay();
+
+    if (GameState.balance === 0) {
+      setTimeout(function() { showMessage('Out of chips! Refresh to play again.', 'msg-lose'); }, 1500);
+    }
+  }
+
+  // ── Event listeners ───────────────────────────────────────
+  chipBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() { addChip(Number(btn.dataset.value)); });
+  });
+
+  btnClearBet.addEventListener('click', clearBet);
+
+  btnDeal.addEventListener('click', function() {
+    if (GameState.gamePhase === 'betting' && GameState.bet > 0) {
+      startGame();
+    } else if (GameState.gamePhase === 'ended') {
+      startGame();
+    }
+  });
+
+  btnHit.addEventListener('click', hit);
+  btnStand.addEventListener('click', stand);
+
+  // ── Init ──────────────────────────────────────────────────
+  updateDisplay();
+  updatePhaseButtons();
+})();
+</script>
+
 </body>
 </html>
