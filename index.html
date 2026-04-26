@@ -618,6 +618,10 @@
       }
     }
   </style>
+  <!-- Firebase SDK (compat mode) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -640,6 +644,7 @@
         <span id="bet-display">$0</span>
       </div>
     </div>
+    <div id="kuma-user-info" style="font-size:0.65rem;color:#a0c080;text-align:center;padding:2px 0 4px;letter-spacing:0.08em;opacity:0.8;min-height:16px;"></div>
 
     <!-- Play Area -->
     <div class="play-area">
@@ -1445,16 +1450,19 @@
           floatAmount('+$' + GameState.bet, 'up', centerX, h * 0.55);
         }
         animateChipStackAway(true);
+        window.KumaAuth && window.KumaAuth.saveGameResult(playerBJ ? 'blackjack' : 'win', GameState.bet, GameState.balance);
       } else if (winner === 'dealer') {
         showMessage(playerBust ? 'Bust! -$' + GameState.bet : 'Dealer wins. -$' + GameState.bet, 'msg-lose');
         flashScreen('flash-lose');
         floatAmount('-$' + GameState.bet, 'down', centerX, h * 0.55);
         animateChipStackAway(false);
+        window.KumaAuth && window.KumaAuth.saveGameResult('lose', GameState.bet, GameState.balance);
       } else {
         GameState.balance += GameState.bet;
         showMessage('Push — bet returned.', 'msg-push');
         FX.emitSparks(centerX, h * 0.55, 16, '#f5d87a');
         animateChipStackAway(false);
+        window.KumaAuth && window.KumaAuth.saveGameResult('push', GameState.bet, GameState.balance);
       }
       updateDisplay();
 
@@ -1517,6 +1525,94 @@
   // Init
   updateDisplay();
   updatePhaseButtons();
+})();
+</script>
+
+
+<!-- ===== KUMA KINGDOM Auth Integration ===== -->
+<script>
+(function () {
+  var firebaseConfig = {
+    apiKey: "AIzaSyCnz26wUZ-78tDbkmnOiu2HSxxnwrFpztA",
+    authDomain: "kuma-6c130.firebaseapp.com",
+    projectId: "kuma-6c130",
+    storageBucket: "kuma-6c130.firebasestorage.app",
+    messagingSenderId: "753252248655",
+    appId: "1:753252248655:web:f2b28c34cb40ea3aea8e3a"
+  };
+  firebase.initializeApp(firebaseConfig);
+  var auth = firebase.auth();
+  var db = firebase.firestore();
+
+  var APP_ID = 'blackjack';
+  var currentUid = null;
+  var elUserInfo = document.getElementById('kuma-user-info');
+
+  // ── URL トークンでサインイン ───────────────────────────
+  var kumaToken = new URLSearchParams(location.search).get('kumaToken');
+  if (kumaToken) {
+    auth.signInWithCustomToken(kumaToken)
+      .then(function() {
+        history.replaceState(null, '', location.pathname);
+      })
+      .catch(function(e) { console.warn('KumaAuth: signIn failed', e); });
+  }
+
+  // ── 認証状態監視 ──────────────────────────────────────
+  auth.onAuthStateChanged(function(user) {
+    if (user) {
+      currentUid = user.uid;
+      loadStats();
+      if (elUserInfo) elUserInfo.textContent = (user.displayName || 'メンバー') + ' でプレイ中';
+    } else {
+      currentUid = null;
+      if (elUserInfo) elUserInfo.textContent = '';
+    }
+  });
+
+  // ── スタッツ読み込み（前回チップ残高を復元）─────────
+  function statsRef() {
+    return db.doc('apps/' + APP_ID + '/users/' + currentUid + '/stats');
+  }
+
+  function loadStats() {
+    statsRef().get().then(function(snap) {
+      if (!snap.exists) return;
+      var data = snap.data();
+      if (typeof data.currentBalance === 'number' && data.currentBalance > 0) {
+        GameState.balance = data.currentBalance;
+        GameState.displayedBalance = data.currentBalance;
+        animateBalance(data.currentBalance);
+      }
+    }).catch(function(e) { console.warn('KumaAuth: loadStats failed', e); });
+  }
+
+  // ── ゲーム結果を Firestore に保存 ────────────────────
+  window.KumaAuth = {
+    saveGameResult: function(result, betAmount, balanceAfter) {
+      if (!currentUid) return;
+      var inc = firebase.firestore.FieldValue.increment;
+      var update = {
+        totalGames: inc(1),
+        currentBalance: balanceAfter,
+        lastPlayedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      };
+      if (result === 'win' || result === 'blackjack') {
+        update.wins = inc(1);
+        update.totalChipsWon = inc(betAmount);
+        update.netChips = inc(betAmount);
+        if (result === 'blackjack') update.blackjacks = inc(1);
+      } else if (result === 'lose') {
+        update.losses = inc(1);
+        update.totalChipsLost = inc(betAmount);
+        update.netChips = inc(-betAmount);
+      } else {
+        update.pushes = inc(1);
+      }
+      statsRef().set(update, { merge: true })
+        .catch(function(e) { console.warn('KumaAuth: saveGameResult failed', e); });
+    }
+  };
 })();
 </script>
 
