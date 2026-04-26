@@ -19,10 +19,11 @@
 
 ---
 
-## Firestore スタッツ（`apps/blackjack/users/{uid}/stats`）
+## Firestore スタッツ（`apps/blackjack/users/{uid}`）
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
+| `displayName` | string | ランキング表示用ユーザー名 |
 | `totalGames` | number | 総プレイ数 |
 | `wins` | number | 勝利数 |
 | `losses` | number | 敗北数 |
@@ -30,7 +31,7 @@
 | `blackjacks` | number | ブラックジャック数 |
 | `totalChipsWon` | number | 総獲得チップ |
 | `totalChipsLost` | number | 総損失チップ |
-| `netChips` | number | 純損益チップ |
+| `netChips` | number | 純損益チップ（ランキング軸） |
 | `currentBalance` | number | 直近セッション終了時のチップ残高（次回引き継ぎ） |
 | `lastPlayedAt` | timestamp | 最終プレイ日時 |
 
