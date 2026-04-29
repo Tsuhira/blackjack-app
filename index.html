@@ -528,6 +528,8 @@
     #btn-hit       { background: linear-gradient(135deg, #5bc870, #207535); color: #fff; min-width: 100px; }
     #btn-stand     { background: linear-gradient(135deg, #e05858, #9e1515); color: #fff; min-width: 100px; }
     #btn-clear-bet { background: linear-gradient(135deg, #888, #444); color: #eee; min-width: 100px; }
+    #btn-half-bet  { background: linear-gradient(135deg, #7ec8e3, #2a7a9a); color: #fff; min-width: 90px; padding: 9px 18px; font-size: clamp(0.7rem, 2vw, 0.85rem); }
+    #btn-allin     { background: linear-gradient(135deg, #f09050, #b03010); color: #fff; min-width: 90px; padding: 9px 18px; font-size: clamp(0.7rem, 2vw, 0.85rem); }
 
     /* Confetti & particle canvas */
     #fx-canvas {
@@ -704,6 +706,10 @@
         <button class="chip-btn chip-50"  data-value="50">$50</button>
         <button class="chip-btn chip-100" data-value="100">$100</button>
         <button class="chip-btn chip-500" data-value="500">$500</button>
+      </div>
+      <div class="btn-row" style="margin-top:-2px;">
+        <button id="btn-half-bet" class="btn">½ Half</button>
+        <button id="btn-allin"    class="btn">🔥 All In</button>
       </div>
       <div class="btn-row">
         <button id="btn-clear-bet" class="btn">Clear Bet</button>
@@ -1002,6 +1008,8 @@
   var elTitle          = document.querySelector('.game-title');
   var elScreenFlash    = el('screen-flash');
   var btnClearBet      = el('btn-clear-bet');
+  var btnHalfBet       = el('btn-half-bet');
+  var btnAllIn         = el('btn-allin');
   var btnDeal          = el('btn-deal');
   var btnHit           = el('btn-hit');
   var btnStand         = el('btn-stand');
@@ -1203,6 +1211,8 @@
 
     chipBtns.forEach(function(b) { b.disabled = !inBetting; });
     btnClearBet.disabled = !inBetting || GameState.bet === 0;
+    btnHalfBet.disabled  = !inBetting || GameState.balance < 2;
+    btnAllIn.disabled    = !inBetting || GameState.balance <= 0;
     btnHit.disabled      = !inPlaying;
     btnStand.disabled    = !inPlaying;
 
@@ -1508,9 +1518,25 @@
     setTimeout(function() { elScreenFlash.className = ''; }, 500);
   }
 
+  function setDirectBet(amount) {
+    if (GameState.gamePhase !== 'betting' || amount <= 0) return;
+    GameState.bet = Math.min(amount, GameState.balance);
+    clearBetStackSilent();
+    showMessage('', 'msg-info');
+    updateDisplay();
+    updatePhaseButtons();
+  }
+
   // ─── Event listeners ─────────────────────────────────────
   chipBtns.forEach(function(btn) {
     btn.addEventListener('click', function() { addChip(Number(btn.dataset.value), btn); });
+  });
+
+  btnHalfBet.addEventListener('click', function() {
+    setDirectBet(Math.floor(GameState.balance / 2));
+  });
+  btnAllIn.addEventListener('click', function() {
+    setDirectBet(GameState.balance);
   });
 
   btnClearBet.addEventListener('click', clearBet);
